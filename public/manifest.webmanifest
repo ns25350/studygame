@@ -1,0 +1,23 @@
+{
+  "id": "/",
+  "name": "学習戦記 — STUDY ARCANA",
+  "short_name": "学習戦記",
+  "description": "学ぶ時間が、冒険の力になる。3Dアクション学習記録PWA。",
+  "lang": "ja",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#101c2b",
+  "theme_color": "#101c2b",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
