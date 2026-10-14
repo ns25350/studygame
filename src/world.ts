@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CHARACTERS, type ActionId, type CharacterId } from './data';
 import type { State } from './model';
+import { UltimateScene } from './cinematic';
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const mat = (color: string | number, metalness = 0.15, roughness = 0.7) =>
@@ -188,12 +189,26 @@ export class World {
   private target = v(-0.8, 1.65, -1.4);
   private resizeObserver: ResizeObserver;
   private isMoving = false;
+  private party: Record<CharacterId, Avatar>;
+  private ultimate: { scene: UltimateScene; impact: () => void; complete: () => void } | null =
+    null;
+  get cinematic() {
+    return this.ultimate !== null;
+  }
   ready = false;
   constructor(canvas: HTMLCanvasElement) {
     this.camera.position.set(7.6, 4, 11);
     this.camera.lookAt(this.target);
     this.avatar = makeAvatar('ko');
     this.scene.add(this.avatar.root);
+    this.party = Object.fromEntries(
+      (['ko', 'ao', 'io', 'mi'] as CharacterId[]).map((id) => {
+        const a = makeAvatar(id);
+        a.root.visible = false;
+        this.scene.add(a.root);
+        return [id, a];
+      }),
+    ) as Record<CharacterId, Avatar>;
     this.telegraph = new THREE.Mesh(
       new THREE.RingGeometry(0.05, 2.8, 64),
       new THREE.MeshBasicMaterial({
@@ -499,7 +514,7 @@ export class World {
   }
   setView(view: string) {
     this.active = view;
-    this.enemy.visible = view === 'battle';
+    this.enemy.visible = view === 'battle' || this.cinematic;
     if (view !== 'battle') {
       this.telegraph.visible = this.danger.visible = false;
       this.avatar.root.position.set(0, 0, 1);
@@ -551,8 +566,35 @@ export class World {
       this.effects.push({ mesh: beam, age: 0, life: 0.8, kind: 'beam' });
     }
   }
-  dodge() {
-    this.dodgeTime = 0.4;
+  playUltimate(id: CharacterId, impact: () => void, complete: () => void) {
+    if (this.ultimate) return;
+    this.setCharacter(id);
+    this.avatar.root.rotation.y = Math.PI;
+    this.avatar.root.position.set(-1, 0.04, 2.65);
+    this.enemy.position.set(0, 0.07, -3.5);
+    this.enemy.visible = true;
+    const scene = new UltimateScene(id, this.reduced);
+    this.scene.add(scene.group);
+    this.ultimate = { scene, impact, complete };
+    this.scene.background = new THREE.Color('#081422');
+    (this.scene.fog as THREE.FogExp2).density = 0.045;
+  }
+  skipUltimate() {
+    const u = this.ultimate;
+    if (!u) return;
+    if (!u.scene.hit) {
+      u.scene.hit = true;
+      u.impact();
+    }
+    this.ultimate = null;
+    this.scene.remove(u.scene.group);
+    u.scene.dispose();
+    this.camera.fov = 40;
+    this.camera.updateProjectionMatrix();
+    this.camera.rotation.z = 0;
+    this.scene.background = new THREE.Color('#132735');
+    (this.scene.fog as THREE.FogExp2).density = 0.022;
+    u.complete();
   }
   impact(x: number, z: number) {
     const ring = mesh(
@@ -575,16 +617,44 @@ export class World {
       battle = this.active === 'battle' && b;
     const portrait = this.active === 'characters' || this.active === 'summon';
     const narrow = innerWidth / innerHeight < 1.1;
-    if (battle) {
-      this.setCharacter(b.char);
-      this.avatar.root.position.set(b.x, 0.04, b.z);
-      this.enemy.position.set(b.enemyX, 0.07, b.enemyZ);
-      if (this.attackTime > 0)
-        this.avatar.root.rotation.y = Math.atan2(b.enemyX - b.x, b.enemyZ - b.z);
-      const cam = v(b.x * 0.32, 10.6, b.z * 0.25 + 13.5);
-      this.camera.position.lerp(cam, Math.min(1, dt * 5));
-      this.target.lerp(v(b.x * 0.45, 0, b.z * 0.4 - 0.4), Math.min(1, dt * 5));
+    const cinematic = this.ultimate;
+    Object.entries(this.party).forEach(([id, ally], i) => {
+      ally.root.visible = !!battle && !cinematic && id !== b?.char;
+      ally.root.position.set([-4.5, -2.6, 0.6, 2.6][i], 0.04, 5.6 + (i % 2) * 0.2);
+      ally.root.scale.setScalar(0.78);
+      ally.root.rotation.y = Math.PI;
+      ally.body.position.y = this.reduced ? 0 : Math.sin(this.time * 1.6 + i) * 0.015;
+    });
+    let cinematicFrame: ReturnType<UltimateScene['update']> | null = null;
+    if (cinematic) {
+      this.setCharacter(cinematic.scene.id);
+      cinematicFrame = cinematic.scene.update(dt);
+      const f = cinematicFrame,
+        p = f.p;
+      this.avatar.root.position.set(-1, 0.04, 2.65);
+      this.avatar.root.rotation.y = Math.PI;
+      if (cinematic.scene.id === 'ko' && p > 0.5 && p < 0.85)
+        this.avatar.root.position.z -= Math.sin(((p - 0.5) / 0.35) * Math.PI) * 4.5;
+      this.camera.position.set(...f.camera.position);
+      this.target.set(...f.camera.target);
+      this.camera.fov = f.camera.fov;
+      this.camera.updateProjectionMatrix();
+      this.avatar.root.scale.setScalar(1);
+      this.enemy.position.set(0, 0.07, -3.5);
       this.enemyCore.rotation.y += dt;
+      this.renderer.domElement.dataset.cameraShot = f.camera.phase;
+      this.renderer.domElement.dataset.cinematic = cinematic.scene.id;
+    } else if (battle) {
+      this.setCharacter(b.char);
+      this.avatar.root.position.set(-1, 0.04, 2.65);
+      this.avatar.root.rotation.y = Math.PI;
+      this.enemy.position.set(0, 0.07, -3.5);
+      if (this.attackTime > 0)
+        this.avatar.root.position.z -= Math.sin((this.attackTime / 0.5) * Math.PI) * 0.7;
+      const cam = narrow ? v(8, 5.6, 14) : v(7, 3.5, 10.5);
+      this.camera.position.lerp(cam, Math.min(1, dt * 6));
+      this.target.lerp(v(0, 1.4, -1), Math.min(1, dt * 6));
+      this.enemyCore.rotation.y += dt * 0.45;
       this.enemyCore.position.y = 1.8 + Math.sin(this.time * 2) * 0.12;
     } else {
       this.setCharacter(s.selected);
@@ -595,8 +665,11 @@ export class World {
       this.avatar.root.rotation.y = 0.25 + (this.reduced ? 0 : Math.sin(this.time * 0.22) * 0.08);
       this.avatar.root.position.y = 0.04;
     }
-    this.avatar.root.scale.setScalar(battle ? 1 : portrait ? 1 : innerHeight < 500 ? 1.42 : 1.12);
+    this.avatar.root.scale.setScalar(
+      battle || cinematic ? 1 : portrait ? 1 : innerHeight < 500 ? 1.42 : 1.12,
+    );
     this.camera.lookAt(this.target);
+    if (cinematicFrame) this.camera.rotation.z += cinematicFrame.camera.roll;
     const animTime = this.reduced ? 0 : this.time;
     const run = battle && this.isMoving;
     this.avatar.legs.forEach(
@@ -616,6 +689,24 @@ export class World {
       : Math.sin(animTime * 1.6) * 0.015;
     this.avatar.body.rotation.z = this.dodgeTime > 0 ? -0.22 : 0;
     this.avatar.cape.rotation.x = 0.18 + (run ? 0.3 : 0) + Math.sin(animTime * 2) * 0.035;
+    if (cinematicFrame) {
+      const p = cinematicFrame.p,
+        id = cinematic!.scene.id;
+      const charge = Math.sin((Math.min(1, p / 0.65) * Math.PI) / 2);
+      this.avatar.arms[1].rotation.x =
+        id === 'ko'
+          ? p < 0.6
+            ? -0.8 * charge
+            : -2.1 * Math.sin(((p - 0.6) / 0.4) * Math.PI)
+          : -1.5 * charge;
+      this.avatar.arms[0].rotation.x = id === 'io' ? -1.6 * charge : -0.6 * charge;
+      this.avatar.body.rotation.x =
+        id === 'ko' && p > 0.55 ? 0.25 * Math.sin(((p - 0.55) / 0.45) * Math.PI) : 0;
+      this.avatar.weapon.rotation.y = id === 'ao' ? this.time * 2 : 0;
+    } else {
+      this.avatar.body.rotation.x = 0;
+      this.avatar.weapon.rotation.y = 0;
+    }
     if (!this.reduced) {
       this.portal.rotation.z = Math.sin(this.time * 0.08) * 0.07;
       this.stars.rotation.y += dt * 0.008;
@@ -643,6 +734,10 @@ export class World {
       return true;
     });
     this.renderer.render(this.scene, this.camera);
+    if (cinematicFrame && this.ultimate === cinematic) {
+      if (cinematicFrame.impact) cinematic!.impact();
+      if (cinematicFrame.done) this.skipUltimate();
+    }
   }
   setTelegraph(x: number, z: number, visible: boolean, progress = 0) {
     this.telegraph.visible = this.danger.visible = visible;

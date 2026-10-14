@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHARACTER_IDS, DUNGEONS, WEAPONS } from '../src/data';
+import { CHARACTER_IDS, DUNGEONS, WEAPONS, type CharacterId } from '../src/data';
 import {
+  beginTurn,
+  queueAction,
+  applyPendingAction,
+  completePendingAction,
+  resolveEnemyTurn,
+  recoverBattle,
+  type State,
   bookValue,
   claimDaily,
   createState,
@@ -24,6 +31,13 @@ import {
   validateSave,
 } from '../src/model';
 
+// Arrange an isolated skill calculation; round-flow behavior is tested separately.
+function actor(s: State, id: CharacterId = 'ko') {
+  const b = s.battle!;
+  b.turn.phase = 'command';
+  b.turn.index = CHARACTER_IDS.indexOf(id);
+  b.char = id;
+}
 test('initial resources, 4 characters and 28 individually owned starter items', () => {
   const s = createState();
   assert.deepEqual([s.lp, s.gems, s.materials, s.exp, rank(s)], [80, 500, 60, 0, 1]);
@@ -188,20 +202,22 @@ test('normal attack consumes LP once, builds SP/gauge, supports save resume with
   b.x = b.enemyX;
   b.z = b.enemyZ + 2;
   const a = stats(s, 'ko').attack;
+  actor(s);
   const r = performAction(s, 'normal', () => 1);
   assert.equal(r.damage, Math.round(0.6 * a * 1.08));
   assert.deepEqual([s.lp, b.sp, b.gauges.ko, b.actions], [70, 6, 28, 1]);
-  assert.throws(() => performAction(s, 'normal'));
+  assert.equal(b.turn.index, 1);
   assert.equal(s.lp, 70);
   s = validateSave(exportSave(s));
   assert.equal(s.battle!.enemyHp, DUNGEONS.normal.hp - r.damage);
   assert.equal(s.lp, 70);
 });
-test('skills enforce range, SP and ultimate gauge before charging resources', () => {
+test('skills enforce command phase, SP and ultimate gauge before charging resources', () => {
   const s = createState();
   startBattle(s, 'normal');
   assert.throws(() => performAction(s, 'normal'));
   assert.equal(s.lp, 80);
+  actor(s);
   s.battle!.sp = 0;
   assert.throws(() => performAction(s, 'skill1'));
   assert.throws(() => performAction(s, 'ultimate'));
@@ -216,6 +232,7 @@ test('collision retains initial-mass subtraction and double LP scaling', () => {
   b.x = 0;
   b.z = 0;
   b.enemyZ = -2;
+  actor(s);
   performAction(s, 'skill1', () => 1);
   const initial = stats(s, 'ko').attack * 2;
   assert.equal(b.mass, initial);
@@ -225,6 +242,7 @@ test('collision retains initial-mass subtraction and double LP scaling', () => {
   for (let i = 0; i < 4; i++) {
     b.cooldowns.normal = 0;
     b.enemyHp = 30000;
+    actor(s);
     performAction(s, 'normal', () => 1);
     expectedMass -= initial * 0.3;
     if (i < 3) assert.ok(Math.abs(b.mass - expectedMass) < 1e-6);
@@ -237,25 +255,25 @@ test('shared shield, healing cap, enemy defense, shared poison and Ao buff', () 
   const s = createState();
   startBattle(s, 'practice');
   const b = s.battle!;
-  b.char = 'io';
+  actor(s, 'io');
   b.z = 0;
   performAction(s, 'skill1', () => 1);
   assert.equal(b.shield, 180);
   const hp = b.hp;
   assert.equal(enemyHit(s), 0);
   assert.equal(b.hp, hp);
-  b.char = 'mi';
+  actor(s, 'mi');
   b.sp = 10;
   b.cooldowns.skill1 = 0;
   performAction(s, 'skill1', () => 1);
   assert.equal(b.poison, 3);
-  b.char = 'ao';
+  actor(s, 'ao');
   b.sp = 10;
   b.cooldowns.skill2 = 0;
   performAction(s, 'skill2', () => 1);
   assert.equal(b.buff, 1.2);
-  assert.equal(b.buffLeft, 8);
-  b.char = 'mi';
+  assert.equal(b.buffLeft, 2);
+  actor(s, 'mi');
   b.cooldowns.skill2 = 0;
   performAction(s, 'skill2', () => 1);
   assert.equal(b.hp, b.maxHp);
@@ -265,6 +283,7 @@ test('win atomically grants each reward once and cycles the six book slots', () 
   startBattle(s, 'normal');
   s.battle!.z = 0;
   s.battle!.enemyHp = 1;
+  beginTurn(s);
   performAction(s, 'normal', () => 1);
   assert.equal(s.battle, null);
   assert.equal(s.gems, 545);
@@ -277,15 +296,17 @@ test('win atomically grants each reward once and cycles the six book slots', () 
   finishBattle(s, true);
   assert.equal(s.gems, 545);
 });
-test('endgame best only improves on faster clear and captures cumulative study', () => {
+test('endgame best only improves on fewer turns and captures cumulative study', () => {
   const s = createState();
   s.lp = 1000;
-  for (const seconds of [40, 50, 40, 30]) {
+  for (const turns of [4, 5, 4, 3]) {
     startBattle(s, 'endgame');
-    s.battle!.elapsed = seconds;
+    s.battle!.elapsed = turns * 10;
+    s.battle!.turn.number = turns;
     finishBattle(s, true);
   }
   assert.equal(s.best!.seconds, 30);
+  assert.equal(s.best!.turns, 3);
   assert.equal(s.booksEarned, 4);
   assert.equal(s.books[27].slot, 3);
   assert.equal(s.books[27].edition, 2);
@@ -362,4 +383,135 @@ test('save rejects corrupt numeric values, duplicate IDs, forged equipment and i
   assert.throws(() =>
     validateSave({ format: 'study-arcana-save', version: 1, state: createState() }),
   );
+});
+
+test('one actor per command, four actions then exactly one enemy retaliation', () => {
+  const s = createState();
+  startBattle(s, 'practice');
+  beginTurn(s);
+  const b = s.battle!,
+    hp = b.hp;
+  for (const id of CHARACTER_IDS) {
+    assert.equal(b.char, id);
+    assert.equal(b.turn.phase, 'command');
+    const pending = queueAction(s, 'normal', () => 1),
+      enemyHp = b.enemyHp;
+    assert.throws(() => queueAction(s, 'normal'));
+    assert.equal(b.enemyHp, enemyHp);
+    applyPendingAction(s, pending.id);
+    const landed = b.enemyHp;
+    assert.equal(applyPendingAction(s, pending.id), null);
+    assert.equal(b.enemyHp, landed);
+    completePendingAction(s, pending.id);
+    completePendingAction(s, pending.id);
+    assert.equal(b.hp, hp);
+  }
+  assert.equal(b.turn.phase, 'enemy');
+  assert.equal(b.turn.index, 4);
+  resolveEnemyTurn(s, 1);
+  assert.ok(b.hp < hp);
+  const after = b.hp;
+  resolveEnemyTurn(s, 1);
+  assert.equal(b.hp, after);
+  assert.equal(b.turn.phase, 'ready');
+  assert.equal(b.turn.number, 2);
+});
+test('paid turns verify four base actions without reserving LP; action LP may change', () => {
+  const s = createState();
+  startBattle(s, 'boss');
+  s.lp = 39;
+  assert.throws(() => beginTurn(s));
+  s.lp = 40;
+  beginTurn(s);
+  assert.equal(s.lp, 40);
+  s.baseLP = 20;
+  const p = queueAction(s, 'normal', () => 1);
+  assert.equal(s.lp, 20);
+  applyPendingAction(s, p.id);
+  completePendingAction(s, p.id);
+  assert.equal(s.battle!.char, 'ao');
+  s.baseLP = 30;
+  assert.throws(() => queueAction(s, 'normal'));
+  assert.equal(s.lp, 20);
+});
+for (const applied of [false, true])
+  test(`ultimate recovery after impact=${applied} charges and awards exactly once`, () => {
+    let s = createState();
+    startBattle(s, 'normal');
+    beginTurn(s);
+    s.battle!.gauges.ko = 100;
+    s.battle!.enemyHp = 1;
+    const p = queueAction(s, 'ultimate', () => 1);
+    assert.equal(s.lp, 70);
+    assert.equal(s.battle!.gauges.ko, 0);
+    if (applied) applyPendingAction(s, p.id);
+    s = validateSave(exportSave(s));
+    recoverBattle(s);
+    assert.equal(s.battle, null);
+    assert.equal(s.gems, 545);
+    assert.equal(s.clears, 1);
+    assert.equal(s.lp, 70);
+    recoverBattle(s);
+    completePendingAction(s, p.id);
+    assert.equal(s.gems, 545);
+    assert.equal(s.lp, 70);
+  });
+test('action-edition save migrates in-flight battle without replacing progress or inventory', () => {
+  const s = createState();
+  s.lp = 333;
+  s.pity.ko.count = 42;
+  s.weapons[0].level = 12;
+  startBattle(s, 'boss');
+  s.battle!.hp = 999;
+  s.battle!.enemyHp = 12345;
+  s.battle!.mass = 500;
+  s.battle!.buffLeft = 8;
+  delete (s.battle as any).turn;
+  const migrated = validateSave(exportSave(s));
+  assert.equal(migrated.lp, 333);
+  assert.equal(migrated.battle!.enemyHp, 12345);
+  assert.equal(migrated.battle!.hp, 999);
+  assert.equal(migrated.battle!.mass, 500);
+  assert.equal(migrated.pity.ko.count, 42);
+  assert.equal(migrated.weapons[0].level, 12);
+  assert.equal(migrated.battle!.turn.phase, 'ready');
+  assert.equal(migrated.battle!.buffLeft, 2);
+  assert.deepEqual(validateSave(exportSave(migrated)), migrated);
+});
+test('poison resolves before retaliation; buff expires by turns; DoT victory skips enemy damage', () => {
+  const s = createState();
+  startBattle(s, 'practice');
+  const b = s.battle!;
+  b.turn.phase = 'enemy';
+  b.turn.index = 4;
+  b.char = 'mi';
+  b.buff = 1.2;
+  b.buffLeft = 2;
+  b.poison = 2;
+  const enemyHp = b.enemyHp;
+  resolveEnemyTurn(s, 1);
+  assert.equal(b.enemyHp, enemyHp - 180);
+  assert.equal(b.buffLeft, 1);
+  b.turn.phase = 'enemy';
+  b.turn.index = 4;
+  b.char = 'mi';
+  b.enemyHp = 1;
+  const hp = b.hp;
+  resolveEnemyTurn(s, 2);
+  assert.equal(s.battle, null);
+  assert.equal(s.lastResult!.won, true);
+  assert.equal(b.hp, hp);
+});
+test('corrupt pending transactions and impossible turn actors cannot be imported', () => {
+  const s = createState();
+  startBattle(s, 'practice');
+  beginTurn(s);
+  s.battle!.gauges.ko = 100;
+  queueAction(s, 'ultimate', () => 1);
+  const bad = structuredClone(s);
+  (bad.battle!.turn.pending!.after as any).turn = { phase: 'ready' };
+  assert.throws(() => validateSave(exportSave(bad)));
+  const actor = structuredClone(s);
+  actor.battle!.char = 'ao';
+  assert.throws(() => validateSave(exportSave(actor)));
 });

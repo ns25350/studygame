@@ -107,7 +107,7 @@ export const DUNGEONS: Record<
     exp: 100,
     book: 1,
     eyebrow: 'CHALLENGE',
-    description: '学びの果てで待つ観測者。最速の記録に挑もう。',
+    description: '学びの果てで待つ観測者。最少ターンの記録に挑もう。',
   },
   practice: {
     name: '訓練の庭',
@@ -119,7 +119,7 @@ export const DUNGEONS: Record<
     exp: 0,
     book: 0,
     eyebrow: 'FREE TRAINING',
-    description: 'LP消費・報酬なし。移動と回避、4人の技を試そう。',
+    description: 'LP消費・報酬なし。4人の技とSPの使い方を試そう。',
   },
 };
 export interface WeaponTemplate {
@@ -175,7 +175,7 @@ export const SKILL_DETAILS: Record<CharacterId, string[]> = {
   ao: [
     '攻撃力75%の遠距離攻撃。',
     '攻撃力170%の攻撃。共有状態異常を2追加。',
-    '全員の与ダメージを1＋0.2×技倍率×LP倍率に更新。8秒間。',
+    '全員の与ダメージを1＋0.2×技倍率×LP倍率に更新。2ターン。',
     '攻撃力550%＋状態異常×300×LP倍率。状態異常を全消費。',
   ],
   io: [

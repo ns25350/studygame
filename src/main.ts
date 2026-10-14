@@ -75,7 +75,12 @@ import {
   equip,
   exportSave,
   finishBattle,
-  performAction,
+  beginTurn,
+  queueAction,
+  applyPendingAction,
+  completePendingAction,
+  resolveEnemyTurn,
+  recoverBattle,
   recordStudy,
   refreshDaily,
   removeRecord,
@@ -104,6 +109,7 @@ import {
   type UIState,
 } from './ui';
 import { World } from './world';
+import { ULTIMATE_THEMES } from './cinematic';
 import './style.css';
 
 const icons = {
@@ -180,6 +186,7 @@ function load(): State {
   return createState();
 }
 let state = load();
+recoverBattle(state);
 refreshDaily(state);
 const ui: UIState = {
   screen: 'home',
@@ -219,11 +226,12 @@ let viewStack: Screen[] = [],
   audio: AudioContext | null = null;
 let installPrompt: any = null,
   registration: ServiceWorkerRegistration | undefined;
-let joystick = { x: 0, z: 0 },
-  keys = new Set<string>(),
-  dodgeLeft = 0,
-  dodgeCooldown = 0,
-  lastDirection = { x: 0, z: -1 };
+const cinematicRoot = document.createElement('div');
+cinematicRoot.id = 'cinematic-root';
+document.body.append(cinematicRoot);
+let actionAnimation: { id: string; time: number; applied: boolean } | null = null;
+let enemyAnimation: { turn: number; time: number; applied: boolean } | null = null;
+let cinematicTimeout = 0;
 
 function refreshIcons() {
   createIcons({ icons, attrs: { 'stroke-width': 1.65 } });
@@ -334,13 +342,12 @@ function render() {
           e.dataset.slot === slot,
       )
       ?.focus({ preventScroll: true });
-  if (ui.screen === 'battle') bindJoystick();
+  if (ui.screen === 'battle') updateHUD();
 }
 function navigate(screen: Screen, push = true) {
   if (ui.screen === 'battle') {
     save();
-    keys.clear();
-    resetJoystick();
+    settleAnimations();
   }
   if (screen === 'battle' && (!state.battle || !world.ready)) {
     toast(
@@ -355,6 +362,10 @@ function navigate(screen: Screen, push = true) {
   render();
 }
 function goBack() {
+  if (world.cinematic) {
+    world.skipUltimate();
+    return;
+  }
   if (modalKind) {
     closeModal();
     return;
@@ -374,8 +385,7 @@ function goBack() {
 function openModal(kind: string, title: string, body: string, footer = '', cls = '') {
   if (!modalKind) focusBeforeModal = document.activeElement as HTMLElement;
   modalKind = kind;
-  keys.clear();
-  resetJoystick();
+
   modalRoot.innerHTML = modal(title, body, footer, cls);
   app.inert = true;
   refreshIcons();
@@ -415,7 +425,7 @@ function showControls() {
   openModal(
     'controls',
     '星の書庫での戦い方',
-    `<div class="controls-guide"><div><span>${icon('move')}</span><h3>動いて、避ける</h3><p>左のパッド / WASD・矢印キーで移動。<br>赤い円の外へ移動するか、回避で攻撃をかわす。</p></div><div><span>${icon('swords')}</span><h3>4人の力をつなぐ</h3><p>左のキャラ / 1〜4キーで交代。<br>通常攻撃 J、スキル K・L、必殺 U、回避 Space。</p></div><div><span>${icon('zap')}</span><h3>学びを、力に</h3><p>通常攻撃でSPとゲージを獲得。<br>必殺はゲージ100で発動。LP不足なら中断して学習記録へ。</p></div></div><p class="quiet-note">コウイチロウ・イオは敵に近づいて攻撃。アオイ・ミナトは遠距離攻撃が可能です。<br>中断・別画面・バックグラウンド中は戦闘を停止して保存します。</p>`,
+    `<div class="controls-guide"><div><span>${icon('swords')}</span><h3>4人で、1つのターン</h3><p>「ターン開始」後、コウイチロウ → アオイ → イオ → ミナトの順に技を選びます。全員の行動後に敵が反撃。選択中に時間制限はありません。</p></div><div><span>${icon('sparkles')}</span><h3>必殺技は、特別な一撃に</h3><p>通常・スキルでゲージをため、100で必殺技。専用3Dカットインはスキップ可能です。キャラクターのスキル画面から無料で演出を見られます。</p></div><div><span>${icon('zap')}</span><h3>学びを、力に</h3><p>通常攻撃はSPを1回復。各行動のLPを10・20・30から選べます。LP不足なら中断して学習を記録し、続きから再開できます。</p></div></div><p class="quiet-note">PC：J / K / L / U または 1〜4 で技を選択。Spaceでターン開始。Escで戻る・演出スキップ。</p>`,
     modalButton('わかった', 'close-modal'),
   );
 }
@@ -541,7 +551,7 @@ function showBattleResult() {
   openModal(
     'battle-result',
     r.won ? (r.mode === 'practice' ? '訓練完了' : '書庫を解放しました') : 'また、次の一歩へ。',
-    `<div class="battle-result"><div class="result-emblem">${icon(r.won ? 'flag' : 'shield')}</div><span class="eyebrow">${r.won ? 'ARCHIVE CLEARED' : 'KEEP LEARNING'}</span><h2>${DUNGEONS[r.mode].name}</h2><p>${r.elapsed.toFixed(1)} 秒 / ${r.actions} 行動</p>${r.won ? `<div class="result-rewards"><span>${icon('gem')} +${r.gems}</span><span>${icon('layers-3')} +${r.materials}</span><span>EXP +${r.exp}</span>${r.book ? '<span>知識本 +1</span>' : ''}</div>` : '<p>獲得報酬はありません。育成や回避で、もう一度挑もう。</p>'}${r.mode === 'practice' ? '<small>訓練ではLPと報酬は変化しません。</small>' : ''}</div>`,
+    `<div class="battle-result"><div class="result-emblem">${icon(r.won ? 'flag' : 'shield')}</div><span class="eyebrow">${r.won ? 'ARCHIVE CLEARED' : 'KEEP LEARNING'}</span><h2>${DUNGEONS[r.mode].name}</h2><p>${r.turns ?? 1} ターン / ${r.actions} 行動</p>${r.won ? `<div class="result-rewards"><span>${icon('gem')} +${r.gems}</span><span>${icon('layers-3')} +${r.materials}</span><span>EXP +${r.exp}</span>${r.book ? '<span>知識本 +1</span>' : ''}</div>` : '<p>獲得報酬はありません。育成や回避で、もう一度挑もう。</p>'}${r.mode === 'practice' ? '<small>訓練ではLPと報酬は変化しません。</small>' : ''}</div>`,
     modalButton('書庫へ戻る', 'close-modal'),
   );
   if (r.won) sound('success');
@@ -551,33 +561,91 @@ function pauseBattle() {
   navigate('dungeons');
   toast('戦闘を中断・保存しました。いつでも再開できます。');
 }
+function displayHit(id: string) {
+  const p = applyPendingAction(state, id);
+  if (!p) return;
+  save();
+  sound('attack');
+  if (p.damage)
+    floatText(number(p.damage) + (p.critical ? ' CRIT' : ''), 0, 3, -3.5, p.critical ? 'crit' : '');
+  if (p.heal) floatText('+' + p.heal + ' HP', -1, 3, 2.65, 'heal');
+  if (p.shield) floatText('+' + p.shield + ' SHIELD', -1, 3, 2.65, 'heal');
+}
+function finishAction(id: string) {
+  completePendingAction(state, id);
+  save();
+  if (!state.battle) showBattleResult();
+  else if (ui.screen === 'battle') render();
+}
+function playCutin(id: CharacterId, pendingId?: string) {
+  if (world.cinematic || !world.ready || modalKind) return;
+  const theme = ULTIMATE_THEMES[id],
+    focused = document.activeElement as HTMLElement;
+  cinematicRoot.innerHTML = `<section class="ultimate-cutin cutin-${id}" style="--cutin-color:${theme.color}" role="dialog" aria-modal="true" aria-label="${theme.title}の必殺カットイン"><div class="cinema-letterbox top"></div><div class="cutin-stripes"></div><div class="cutin-heading"><span>ULTIMATE · ${CHARACTERS[id].element}</span><h2>${CHARACTERS[id].name}</h2></div><button class="cutin-skip" data-action="skip-cutin">演出をスキップ ${icon('chevron-right')}</button><div class="cutin-title"><span>${theme.subtitle}</span><h1>${theme.title}</h1><p>${theme.motif}</p>${!pendingId ? '<small>演出プレビュー / LP・SP・ゲージは変化しません</small>' : ''}</div><div class="cinema-letterbox bottom"></div></section>`;
+  document.body.classList.add('cinematic-active');
+  app.inert = true;
+  refreshIcons();
+  cinematicRoot.querySelector<HTMLButtonElement>('button')!.focus();
+  const cleanup = () => {
+    clearTimeout(cinematicTimeout);
+    cinematicRoot.innerHTML = '';
+    app.inert = false;
+    document.body.classList.remove('cinematic-active');
+    canvas.removeAttribute('data-cinematic');
+    canvas.removeAttribute('data-camera-shot');
+    world.setView(ui.screen);
+    if (pendingId) finishAction(pendingId);
+    else {
+      render();
+      if (focused?.isConnected) focused.focus();
+    }
+  };
+  world.playUltimate(
+    id,
+    () => {
+      if (pendingId) displayHit(pendingId);
+    },
+    cleanup,
+  );
+  cinematicTimeout = window.setTimeout(() => world.skipUltimate(), 9000);
+}
 function attack(action: ActionId) {
-  if (ui.screen !== 'battle' || modalKind || !state.battle) return;
-  const b = state.battle,
-    enemyX = b.enemyX,
-    enemyZ = b.enemyZ;
+  if (
+    ui.screen !== 'battle' ||
+    modalKind ||
+    !state.battle ||
+    world.cinematic ||
+    actionAnimation ||
+    enemyAnimation
+  )
+    return;
   try {
-    const r = performAction(state, action);
+    const p = queueAction(state, action);
     save();
-    world.attack(action, b.x, b.z);
-    sound('attack');
-    if (r.damage)
-      floatText(
-        number(r.damage) + (r.critical ? ' CRIT' : ''),
-        enemyX,
-        3,
-        enemyZ,
-        r.critical ? 'crit' : '',
-      );
-    if (r.heal) floatText('+' + r.heal + ' HP', b.x, 3, b.z, 'heal');
-    if (r.shield) floatText('+' + r.shield + ' SHIELD', b.x, 2.6, b.z, 'heal');
-    if (!r.damage && !r.heal && !r.shield)
-      floatText(action === 'skill1' ? '衝突状態' : '強化', b.x, 3, b.z, 'heal');
-    if (!state.battle) showBattleResult();
-    else updateHUD();
+    render();
+    if (action === 'ultimate') playCutin(p.actor, p.id);
+    else {
+      actionAnimation = { id: p.id, time: 0, applied: false };
+      world.attack(action, -1, 2.65);
+    }
   } catch (error) {
     toast((error as Error).message, 2200);
   }
+}
+function settleAnimations() {
+  const hadBattle = !!state.battle;
+  if (world.cinematic) world.skipUltimate();
+  if (actionAnimation) {
+    const id = actionAnimation.id;
+    actionAnimation = null;
+    completePendingAction(state, id);
+  }
+  if (enemyAnimation) {
+    resolveEnemyTurn(state, enemyAnimation.turn);
+    enemyAnimation = null;
+  }
+  if (hadBattle && !state.battle && ui.screen === 'battle') showBattleResult();
+  save();
 }
 function floatText(text: string, x: number, y: number, z: number, cls = '') {
   const layer = document.querySelector('#damage-layer');
@@ -591,57 +659,6 @@ function floatText(text: string, x: number, y: number, z: number, cls = '') {
   layer.append(node);
   setTimeout(() => node.remove(), 1300);
 }
-function dodge() {
-  if (ui.screen !== 'battle' || modalKind || !state.battle || dodgeCooldown > 0) return;
-  dodgeLeft = 0.32;
-  dodgeCooldown = 1.4;
-  world.dodge();
-  sound('attack');
-}
-function resetJoystick() {
-  joystick = { x: 0, z: 0 };
-  document
-    .querySelector<HTMLElement>('#joystick-thumb')
-    ?.style.setProperty('transform', 'translate(0px, 0px)');
-}
-function bindJoystick() {
-  const pad = document.querySelector<HTMLElement>('#joystick');
-  if (!pad) return;
-  let pointer: number | null = null;
-  const move = (event: PointerEvent) => {
-    if (event.pointerId !== pointer) return;
-    const r = pad.getBoundingClientRect(),
-      dx = event.clientX - (r.left + r.width / 2),
-      dz = event.clientY - (r.top + r.height / 2),
-      max = r.width * 0.32;
-    const length = Math.hypot(dx, dz),
-      scale = length > max ? max / length : 1;
-    joystick = { x: (dx * scale) / max, z: (dz * scale) / max };
-    document.querySelector<HTMLElement>('#joystick-thumb')!.style.transform =
-      `translate(${dx * scale}px, ${dz * scale}px)`;
-  };
-  pad.addEventListener('pointerdown', (e) => {
-    pointer = e.pointerId;
-    pad.setPointerCapture(e.pointerId);
-    move(e);
-  });
-  pad.addEventListener('pointermove', move);
-  const end = () => {
-    pointer = null;
-    resetJoystick();
-  };
-  pad.addEventListener('pointerup', end);
-  pad.addEventListener('pointercancel', end);
-  pad.addEventListener('lostpointercapture', end);
-}
-function switchCharacter(id: CharacterId) {
-  if (!state.battle || modalKind) return;
-  state.battle.char = id;
-  save();
-  keys.clear();
-  resetJoystick();
-  render();
-}
 function updateHUD() {
   const b = state.battle;
   if (!b || ui.screen !== 'battle') return;
@@ -650,7 +667,7 @@ function updateHUD() {
     if (el && el.textContent !== value) el.textContent = value;
   };
   setText('battle-enemy-text', `${number(b.enemyHp)} / ${number(DUNGEONS[b.mode].hp)}`);
-  setText('battle-clock', clock(b.elapsed));
+  setText('battle-clock', 'TURN ' + String(b.turn.number).padStart(2, '0'));
   setText('battle-hp-text', `${number(b.hp)} / ${number(b.maxHp)}`);
   setText('battle-lp', b.free ? '無料' : number(state.lp) + ' LP');
   setText('battle-sp', b.sp + '/10');
@@ -671,21 +688,21 @@ function updateHUD() {
       (el) => (el.textContent = Math.floor(b.gauges[el.dataset.partyGauge as CharacterId]) + '%'),
     );
   for (const action of ACTIONS) {
-    const el = document.querySelector<HTMLElement>('#cooldown-' + action),
-      button = el?.parentElement as HTMLButtonElement | null;
-    if (el) {
-      el.textContent = b.cooldowns[action] > 0 ? b.cooldowns[action].toFixed(1) : '';
-      el.classList.toggle('active', b.cooldowns[action] > 0);
-    }
+    const button = document.querySelector<HTMLButtonElement>(
+      `[data-action="attack"][data-value="${action}"]`,
+    );
     const index = ACTIONS.indexOf(action),
       unavailable =
-        b.cooldowns[action] > 0 ||
+        b.turn.phase !== 'command' ||
         b.sp < CHARACTERS[b.char].sp[index] ||
-        (action === 'ultimate' && b.gauges[b.char] < 100);
-    button?.classList.toggle('unavailable', unavailable);
-    button?.setAttribute('aria-disabled', String(unavailable));
+        (action === 'ultimate' && b.gauges[b.char] < 100) ||
+        (!b.free && state.lp < state.baseLP);
+    if (button) {
+      button.disabled = unavailable;
+      button.classList.toggle('unavailable', unavailable);
+      button.setAttribute('aria-disabled', String(unavailable));
+    }
   }
-  document.querySelector('.dodge-button')?.classList.toggle('unavailable', dodgeCooldown > 0);
   setText(
     'battle-buffs',
     `${b.collision ? `衝突：質量 ${number(b.mass)} / 速さ ${number(b.speed)}　` : ''}${b.poison ? '状態異常 ×' + b.poison + '　' : ''}${b.buffLeft > 0 ? '与ダメージ ' + b.buff.toFixed(2) + '倍' : ''}`,
@@ -697,6 +714,7 @@ document.addEventListener('click', async (event) => {
   if (!target || target.hasAttribute('disabled')) return;
   const action = target.dataset.action!,
     value = target.dataset.value!;
+  if (world.cinematic && action !== 'skip-cutin') return;
   switch (action) {
     case 'navigate':
       navigate(value as Screen);
@@ -817,7 +835,6 @@ document.addEventListener('click', async (event) => {
         break;
       }
       if (change(() => startBattle(state, ui.dungeon), undefined, false)) {
-        dodgeCooldown = dodgeLeft = 0;
         navigate('battle');
       }
       break;
@@ -833,11 +850,21 @@ document.addEventListener('click', async (event) => {
     case 'attack':
       attack(value as ActionId);
       break;
-    case 'dodge':
-      dodge();
+    case 'begin-turn':
+      if (!actionAnimation && !enemyAnimation) change(() => beginTurn(state));
       break;
-    case 'battle-character':
-      switchCharacter(value as CharacterId);
+    case 'skip-cutin':
+      world.skipUltimate();
+      break;
+    case 'preview-ultimate':
+      if (!actionAnimation && !enemyAnimation) playCutin((value || state.selected) as CharacterId);
+      break;
+    case 'battle-log':
+      openModal(
+        'battle-log',
+        '戦闘ログ',
+        `<div class="turn-log">${state.battle?.turn.log.length ? state.battle.turn.log.map((l) => `<p>${esc(l)}</p>`).join('') : '<p>行動を選択すると、ここに記録されます。</p>'}</div>`,
+      );
       break;
     case 'retreat':
       confirmAction(
@@ -1100,6 +1127,13 @@ document.addEventListener('keydown', (e) => {
     goBack();
     return;
   }
+  if (world.cinematic) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      cinematicRoot.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+    return;
+  }
   if (modalKind) {
     if (e.key === 'Tab') {
       const items = Array.from(
@@ -1131,41 +1165,45 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (ui.screen === 'battle') {
-    const key = e.key.toLowerCase();
-    if (
-      ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)
-    ) {
-      e.preventDefault();
-      keys.add(key);
-    }
     if (e.repeat) return;
-    if (key === ' ') dodge();
+    const key = e.key.toLowerCase();
+    if (key === ' ' && !actionAnimation && !enemyAnimation && !world.cinematic) {
+      e.preventDefault();
+      if (state.battle?.turn.phase === 'ready') change(() => beginTurn(state));
+    }
     const action = (
-      { j: 'normal', k: 'skill1', l: 'skill2', u: 'ultimate' } as Record<string, ActionId>
+      {
+        j: 'normal',
+        k: 'skill1',
+        l: 'skill2',
+        u: 'ultimate',
+        '1': 'normal',
+        '2': 'skill1',
+        '3': 'skill2',
+        '4': 'ultimate',
+      } as Record<string, ActionId>
     )[key];
     if (action) {
       e.preventDefault();
       attack(action);
     }
-    if (['1', '2', '3', '4'].includes(key)) switchCharacter(CHARACTER_IDS[Number(key) - 1]);
   }
 });
-document.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => {
-  keys.clear();
-  resetJoystick();
-  save();
+  if (!world.cinematic) save();
 });
 document.addEventListener('visibilitychange', () => {
-  keys.clear();
-  resetJoystick();
+  if (document.hidden) settleAnimations();
   save();
   if (!document.hidden) {
     refreshDaily(state);
-    if (ui.screen !== 'battle') render();
+    render();
   }
 });
-window.addEventListener('pagehide', save);
+window.addEventListener('pagehide', () => {
+  settleAnimations();
+  save();
+});
 document.addEventListener('world-lost', () => {
   if (ui.screen === 'battle') pauseBattle();
   toast('3D描画が中断されました。戦闘は保存済みです。描画の復帰をお待ちください。', 7000);
@@ -1230,7 +1268,6 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 }
 
 let lastTime = performance.now(),
-  hudClock = 0,
   saveClock = 0,
   timerClock = 0;
 function frame(now: number) {
@@ -1239,100 +1276,52 @@ function frame(now: number) {
   lastTime = now;
   if (document.hidden) return;
   const b = state.battle;
-  if (ui.screen === 'battle' && b && !modalKind && world.ready) {
+  if (ui.screen === 'battle' && b && !modalKind && world.ready && !world.cinematic) {
     b.elapsed += dt;
-    dodgeCooldown = Math.max(0, dodgeCooldown - dt);
-    dodgeLeft = Math.max(0, dodgeLeft - dt);
-    let dx =
-      joystick.x +
-      (keys.has('d') || keys.has('arrowright') ? 1 : 0) -
-      (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
-    let dz =
-      joystick.z +
-      (keys.has('s') || keys.has('arrowdown') ? 1 : 0) -
-      (keys.has('w') || keys.has('arrowup') ? 1 : 0);
-    const length = Math.hypot(dx, dz);
-    if (length > 1) {
-      dx /= length;
-      dz /= length;
-    }
-    if (length > 0.1) {
-      lastDirection = { x: dx, z: dz };
-      world.face(dx, dz);
-    }
-    if (dodgeLeft > 0) {
-      dx = lastDirection.x;
-      dz = lastDirection.z;
-    }
-    const speed = dodgeLeft > 0 ? 13 : 4.2;
-    b.x += dx * dt * speed;
-    b.z += dz * dt * speed;
-    const radius = Math.hypot(b.x, b.z);
-    if (radius > 10.5) {
-      b.x *= 10.5 / radius;
-      b.z *= 10.5 / radius;
-    }
-    world.setMoving(length > 0.1 || dodgeLeft > 0);
-    const ex = b.x - b.enemyX,
-      ez = b.z - b.enemyZ,
-      distance = Math.hypot(ex, ez);
-    if (distance > 2.2 && b.enemyClock < 2.7) {
-      b.enemyX += (ex / distance) * dt * 0.8;
-      b.enemyZ += (ez / distance) * dt * 0.8;
-    }
-    for (const action of ACTIONS) b.cooldowns[action] = Math.max(0, b.cooldowns[action] - dt);
-    if (b.buffLeft > 0) {
-      b.buffLeft = Math.max(0, b.buffLeft - dt);
-      if (b.buffLeft === 0) b.buff = 1;
-    }
-    const previousClock = b.enemyClock;
-    b.enemyClock += dt;
-    if (previousClock < 2.7 && b.enemyClock >= 2.7) {
-      b.targetX = b.x;
-      b.targetZ = b.z;
-    }
-    world.setTelegraph(b.targetX, b.targetZ, b.enemyClock >= 2.7, (b.enemyClock - 2.7) / 1.1);
-    if (b.enemyClock >= 3.8) {
-      b.enemyClock -= 3.8;
-      world.impact(b.targetX, b.targetZ);
-      if (Math.hypot(b.x - b.targetX, b.z - b.targetZ) < 2.8 && dodgeLeft === 0) {
-        const hit = enemyHit(state);
-        floatText(hit ? '−' + hit : 'BLOCK', b.x, 2.7, b.z, 'taken');
-        sound('hit');
-      } else floatText('DODGE', b.x, 2.7, b.z, 'heal');
-      save();
-      if (!state.battle) {
-        showBattleResult();
-        return;
+    if (actionAnimation) {
+      const a = actionAnimation;
+      a.time += dt;
+      if (a.time >= 0.35 && !a.applied) {
+        a.applied = true;
+        displayHit(a.id);
       }
-    }
-    b.poisonClock += dt;
-    if (b.poisonClock >= 4) {
-      b.poisonClock -= 4;
-      if (b.poison) {
-        const damage = b.poison * 90;
-        b.enemyHp = Math.max(0, b.enemyHp - damage);
-        floatText(number(damage), b.enemyX, 3.5, b.enemyZ, 'poison');
-        if (!b.enemyHp) {
-          finishBattle(state, true);
+      if (a.time >= 0.8) {
+        actionAnimation = null;
+        finishAction(a.id);
+      }
+    } else {
+      if (b.turn.phase === 'enemy' && !enemyAnimation)
+        enemyAnimation = { turn: b.turn.number, time: 0, applied: false };
+      if (enemyAnimation) {
+        const e = enemyAnimation;
+        e.time += dt;
+        if (e.time >= 0.65 && !e.applied) {
+          e.applied = true;
+          const r = resolveEnemyTurn(state, e.turn);
           save();
-          showBattleResult();
-          return;
+          if (r) {
+            if (r.damage) floatText('−' + r.damage, -1, 3, 2.65, 'taken');
+            world.impact(-1, 2.65);
+            sound('hit');
+          }
+          if (!state.battle) {
+            enemyAnimation = null;
+            showBattleResult();
+          }
         }
-        save();
+        if (enemyAnimation && e.time >= 1.1) {
+          enemyAnimation = null;
+          if (!state.battle) showBattleResult();
+          else render();
+        }
       }
-    }
-    hudClock += dt;
-    if (hudClock > 0.08) {
-      updateHUD();
-      hudClock = 0;
     }
     saveClock += dt;
-    if (saveClock > 2) {
+    if (saveClock >= 2) {
       save();
       saveClock = 0;
     }
-  } else world.setMoving(false);
+  }
   world.update(dt, state);
   timerClock += dt;
   if (timerClock >= 0.5) {
@@ -1340,7 +1329,7 @@ function frame(now: number) {
     if (state.daily.date !== dayKey()) {
       refreshDaily(state);
       save();
-      if (ui.screen !== 'battle') render();
+      if (ui.screen !== 'battle' && !world.cinematic) render();
     }
     if (state.timer) {
       const elapsed = Math.max(0, (Date.now() - state.timer.start) / 1000);
@@ -1353,6 +1342,7 @@ function frame(now: number) {
   }
 }
 render();
+save();
 requestAnimationFrame(frame);
 if (startupWarning) toast(startupWarning, 10000);
 else if (!world.ready)

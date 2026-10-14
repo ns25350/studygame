@@ -8005,3 +8005,876 @@ kbd {
     font-size: 8px;
   }
 }
+
+/* Command-based 3D RPG presentation. */
+.turn-battle .turn-order {
+  position: absolute;
+  left: max(24px, env(safe-area-inset-left));
+  top: 110px;
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.turn-order > .tiny-label {
+  font-size: 9px;
+  margin-bottom: 3px;
+  color: #c4d9e4;
+}
+.turn-actor {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 61px;
+  padding: 9px;
+  background: #12283ac7;
+  border: 1px solid #718ba15f;
+  border-radius: 4px;
+  backdrop-filter: blur(8px);
+  border-left: 3px solid transparent;
+}
+.turn-actor.active {
+  border-color: var(--cyan);
+  background: #315267d9;
+  box-shadow: 0 0 18px #b3e7f21b;
+}
+.turn-actor.acted {
+  opacity: 0.5;
+}
+.turn-actor .order-number {
+  color: #a9c2cb;
+  font-size: 9px;
+  width: 16px;
+}
+.turn-actor.active .order-number {
+  color: var(--gold);
+}
+.turn-actor > div {
+  flex: 1;
+  min-width: 0;
+}
+.turn-actor strong {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.turn-actor small {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+}
+.turn-actor i {
+  font-style: normal;
+  color: var(--gold);
+}
+.turn-enemy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px;
+  color: #cfb9a6;
+  background: #382d2f88;
+  border: 1px solid #b38f7859;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.turn-enemy > svg {
+  width: 16px;
+  height: 16px;
+}
+.turn-enemy.active {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+.turn-state {
+  position: absolute;
+  left: 53%;
+  bottom: 210px;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 2px 10px #081421;
+  width: max-content;
+  max-width: 60%;
+}
+.turn-state > .eyebrow {
+  display: block;
+  color: var(--gold);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+}
+.turn-state > strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  margin: 9px 0;
+}
+.turn-state > p {
+  font-size: 11px;
+  color: #c6dbe7;
+}
+.turn-start {
+  margin-top: 16px;
+  min-width: 190px;
+  min-height: 46px;
+  gap: 22px;
+  box-shadow: 0 4px 30px #f1d49b24;
+}
+.turn-battle .battle-status {
+  left: max(28px, env(safe-area-inset-left));
+  bottom: 75px;
+  transform: none;
+  width: 270px;
+}
+.turn-battle .battle-buffs {
+  white-space: normal;
+  line-height: 1.8;
+  max-width: 300px;
+}
+.turn-command-panel {
+  position: absolute;
+  right: max(30px, env(safe-area-inset-right));
+  bottom: 50px;
+  width: min(58%, 650px);
+}
+.command-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #b3e7f23d;
+}
+.command-heading > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.command-heading b {
+  font-size: 13px;
+  color: #e3eef4;
+  margin-left: 6px;
+  font-weight: 500;
+}
+.battle-lp-picker {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.battle-lp-picker > span {
+  font-size: 10px;
+  color: var(--cyan);
+}
+.battle-lp-picker button {
+  min-height: 32px;
+  min-width: 52px;
+  border: 1px solid #718ba18a;
+  border-radius: 4px;
+  background: #173044b8;
+  font-size: 10px;
+  padding: 7px;
+}
+.battle-lp-picker button.selected {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  box-shadow: inset 2px 0 var(--cyan);
+}
+.turn-battle .action-controls {
+  position: static;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.turn-battle .action-button {
+  width: 100%;
+  min-height: 109px;
+  border-radius: 5px;
+  padding: 8px 3px;
+  gap: 7px;
+}
+.turn-battle .action-button b {
+  font-size: 11px;
+  white-space: nowrap;
+  letter-spacing: -0.03em;
+}
+.turn-battle .action-button > small {
+  font-size: 9px;
+}
+.turn-battle .action-button > kbd {
+  font-size: 8px;
+  top: 7px;
+  right: 6px;
+}
+.turn-battle .action-ultimate {
+  min-height: 109px;
+}
+.turn-battle .action-button:disabled {
+  opacity: 0.55;
+}
+.turn-battle .battle-footer {
+  left: auto;
+  right: max(30px, env(safe-area-inset-right));
+  transform: none;
+  gap: 22px;
+  font-size: 9px;
+}
+.preview-ultimate {
+  display: flex;
+  margin-top: 12px;
+  font-size: 10px;
+  min-height: 40px;
+  padding: 8px 11px;
+  color: var(--gold);
+  border-color: #f1d49b9c;
+}
+.preview-ultimate > svg {
+  width: 14px;
+  height: 14px;
+}
+.turn-log p {
+  padding: 10px 0;
+  border-bottom: 1px solid #718ba14c;
+  color: #cbdde8;
+  font-size: 12px;
+}
+#cinematic-root {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+.cinematic-active #app {
+  opacity: 0;
+  pointer-events: none;
+}
+.ultimate-cutin {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--cutin-color);
+  background: linear-gradient(90deg, #06111c55, transparent 35%, transparent 70%, #06111c44);
+}
+.cinema-letterbox {
+  height: 9%;
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #050c14ed;
+  z-index: 3;
+}
+.cinema-letterbox.top {
+  top: 0;
+  border-bottom: 1px solid #b3e7f233;
+}
+.cinema-letterbox.bottom {
+  bottom: 0;
+  border-top: 1px solid #b3e7f233;
+}
+.cutin-heading {
+  position: absolute;
+  left: max(5.5%, env(safe-area-inset-left));
+  top: 14%;
+  text-shadow: 0 4px 20px #000a;
+}
+.cutin-heading > span {
+  font-size: 10px;
+  letter-spacing: 0.28em;
+}
+.cutin-heading > h2 {
+  font-family: 'Yu Mincho', serif;
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  margin-top: 11px;
+  color: #f1f6fc;
+}
+.cutin-skip {
+  position: absolute;
+  top: 12%;
+  right: max(4%, env(safe-area-inset-right));
+  min-height: 44px;
+  padding: 10px 17px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #b3e7f27a;
+  border-radius: 4px;
+  background: #102232cb;
+  color: #e3eef4;
+  font-size: 12px;
+  pointer-events: auto;
+  z-index: 4;
+}
+.cutin-skip > svg {
+  width: 16px;
+  height: 16px;
+}
+.cutin-title {
+  position: absolute;
+  left: max(7%, env(safe-area-inset-left));
+  bottom: 14%;
+  border-left: 3px solid var(--cutin-color);
+  padding: 6px 0 6px 24px;
+  text-shadow:
+    0 2px 15px #000,
+    0 0 30px #0008;
+  animation: cutin-title-in 0.65s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.cutin-title > span {
+  font-size: 11px;
+  letter-spacing: 0.35em;
+}
+.cutin-title > h1 {
+  font-family: 'Yu Mincho', serif;
+  font-size: clamp(32px, 4.5vw, 66px);
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  margin: 12px 0;
+  color: #f1f6fc;
+}
+.cutin-title > p {
+  font-size: 13px;
+  letter-spacing: 0.13em;
+  color: #d3e6ef;
+}
+.cutin-title > small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 12px;
+}
+.cutin-stripes {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    115deg,
+    transparent,
+    transparent 70px,
+    #b3e7f207 71px,
+    #b3e7f207 73px,
+    transparent 74px
+  );
+  opacity: 0.35;
+  mask-image: linear-gradient(90deg, #000, transparent 40%);
+  animation: cutin-stripe-in 0.8s ease-out both;
+}
+@keyframes cutin-title-in {
+  from {
+    opacity: 0;
+    transform: translateX(-75px);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+@keyframes cutin-stripe-in {
+  from {
+    transform: translateX(-100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 0.35;
+  }
+}
+@media (max-width: 1100px) {
+  .turn-battle .turn-order {
+    width: 160px;
+    top: 100px;
+    left: 20px;
+  }
+  .turn-actor {
+    min-height: 52px;
+    padding: 7px;
+    gap: 7px;
+  }
+  .turn-actor strong {
+    font-size: 10px;
+  }
+  .turn-actor small {
+    font-size: 8px;
+  }
+  .turn-battle .battle-status {
+    left: 22px;
+    width: 235px;
+  }
+  .turn-command-panel {
+    right: 22px;
+    width: 61%;
+    bottom: 48px;
+  }
+  .turn-battle .action-button b {
+    font-size: 10px;
+  }
+  .turn-battle .action-button > small {
+    font-size: 8px;
+  }
+  .turn-battle .action-controls {
+    gap: 8px;
+  }
+  .turn-state {
+    bottom: 200px;
+  }
+  .command-heading b {
+    font-size: 11px;
+  }
+  .command-heading > span {
+    font-size: 9px;
+  }
+}
+@media (max-height: 650px) and (orientation: landscape) {
+  .turn-battle .turn-order {
+    top: 85px;
+    width: 148px;
+    left: max(16px, env(safe-area-inset-left));
+    gap: 6px;
+  }
+  .turn-order > .tiny-label {
+    font-size: 7px;
+  }
+  .turn-actor {
+    min-height: 43px;
+    padding: 5px;
+    gap: 6px;
+  }
+  .turn-actor .party-avatar {
+    width: 25px;
+    height: 31px;
+    font-size: 19px;
+  }
+  .turn-actor .order-number {
+    font-size: 7px;
+    width: 12px;
+  }
+  .turn-actor strong {
+    font-size: 9px;
+    margin-bottom: 5px;
+  }
+  .turn-actor small {
+    font-size: 7px;
+  }
+  .turn-enemy {
+    padding: 7px;
+    font-size: 8px;
+  }
+  .turn-battle .battle-status {
+    left: max(20px, env(safe-area-inset-left));
+    bottom: 68px;
+    width: 228px;
+  }
+  .turn-command-panel {
+    right: max(18px, env(safe-area-inset-right));
+    bottom: 35px;
+    width: 62%;
+  }
+  .command-heading {
+    gap: 9px;
+    margin-bottom: 8px;
+    padding-bottom: 7px;
+  }
+  .command-heading b {
+    font-size: 10px;
+    margin-left: 4px;
+  }
+  .command-heading > span {
+    font-size: 8px;
+  }
+  .battle-lp-picker button {
+    min-height: 30px;
+    min-width: 43px;
+    padding: 5px;
+    font-size: 9px;
+  }
+  .battle-lp-picker > span {
+    font-size: 8px;
+  }
+  .turn-battle .action-button,
+  .turn-battle .action-ultimate {
+    min-height: 85px;
+    gap: 5px;
+    padding: 7px 2px;
+  }
+  .turn-battle .action-button b {
+    font-size: 10px;
+  }
+  .turn-battle .action-button > small {
+    font-size: 7px;
+  }
+  .turn-battle .action-button > kbd {
+    font-size: 6px;
+    top: 5px;
+    right: 5px;
+  }
+  .turn-battle .action-icon {
+    width: 29px;
+    height: 29px;
+  }
+  .turn-state {
+    bottom: 170px;
+    left: 54%;
+  }
+  .turn-state > strong {
+    font-size: 16px;
+    margin: 6px 0;
+  }
+  .turn-state > .eyebrow {
+    font-size: 8px;
+  }
+  .turn-state > p {
+    font-size: 9px;
+  }
+  .turn-start {
+    margin-top: 12px;
+    min-width: 160px;
+    min-height: 44px;
+    padding: 9px 13px;
+    font-size: 12px;
+  }
+  .turn-battle .battle-footer {
+    bottom: 12px;
+    right: 20px;
+    font-size: 8px;
+    gap: 15px;
+  }
+  .cutin-heading > h2 {
+    font-size: 24px;
+    margin-top: 7px;
+  }
+  .cutin-heading > span {
+    font-size: 8px;
+  }
+  .cutin-title {
+    padding-left: 17px;
+    bottom: 13%;
+  }
+  .cutin-title > h1 {
+    font-size: 37px;
+    margin: 8px 0;
+  }
+  .cutin-title > span {
+    font-size: 8px;
+  }
+  .cutin-title > p {
+    font-size: 10px;
+  }
+  .cutin-title > small {
+    font-size: 8px;
+    margin-top: 7px;
+  }
+  .cutin-skip {
+    font-size: 10px;
+    padding: 9px 13px;
+  }
+  .preview-ultimate {
+    min-height: 36px;
+    font-size: 9px;
+  }
+}
+@media (max-height: 450px) and (orientation: landscape) {
+  .turn-battle .turn-order {
+    top: 68px;
+    width: 130px;
+    gap: 4px;
+    left: max(12px, env(safe-area-inset-left));
+  }
+  .turn-actor {
+    min-height: 34px;
+    padding: 4px;
+    gap: 5px;
+  }
+  .turn-actor .party-avatar {
+    width: 20px;
+    height: 26px;
+    font-size: 16px;
+  }
+  .turn-actor .order-number {
+    font-size: 6px;
+    width: 10px;
+  }
+  .turn-actor strong {
+    font-size: 8px;
+    margin-bottom: 3px;
+  }
+  .turn-actor small {
+    font-size: 6px;
+  }
+  .turn-enemy {
+    padding: 6px;
+    font-size: 7px;
+  }
+  .turn-enemy > svg {
+    width: 12px;
+    height: 12px;
+  }
+  .turn-battle .battle-status {
+    left: max(15px, env(safe-area-inset-left));
+    bottom: 63px;
+    width: 210px;
+  }
+  .turn-command-panel {
+    bottom: 30px;
+    width: 62%;
+    right: max(14px, env(safe-area-inset-right));
+  }
+  .command-heading {
+    gap: 8px;
+    margin-bottom: 7px;
+    padding-bottom: 6px;
+    min-height: 30px;
+  }
+  .command-heading > span {
+    font-size: 7px;
+  }
+  .command-heading b {
+    font-size: 9px;
+  }
+  .battle-lp-picker > span {
+    font-size: 7px;
+  }
+  .battle-lp-picker button {
+    min-height: 29px;
+    min-width: 39px;
+    font-size: 8px;
+    padding: 5px;
+  }
+  .turn-battle .action-controls {
+    gap: 6px;
+  }
+  .turn-battle .action-button,
+  .turn-battle .action-ultimate {
+    min-height: 76px;
+    padding: 6px 2px;
+    gap: 5px;
+  }
+  .turn-battle .action-button b {
+    font-size: 9px;
+  }
+  .turn-battle .action-button > small {
+    font-size: 7px;
+  }
+  .turn-battle .action-icon {
+    width: 25px;
+    height: 25px;
+  }
+  .turn-battle .action-icon > svg {
+    width: 17px;
+    height: 17px;
+  }
+  .turn-state {
+    bottom: 151px;
+  }
+  .turn-state > .eyebrow {
+    font-size: 7px;
+  }
+  .turn-state > strong {
+    font-size: 14px;
+    margin: 5px 0;
+  }
+  .turn-state > p {
+    font-size: 8px;
+  }
+  .turn-start {
+    min-height: 44px;
+    min-width: 150px;
+    font-size: 11px;
+    margin-top: 10px;
+  }
+  .turn-battle .battle-footer {
+    bottom: 9px;
+    right: 15px;
+    font-size: 7px;
+    gap: 12px;
+  }
+  .cutin-title > h1 {
+    font-size: 30px;
+    letter-spacing: 0.1em;
+    margin: 6px 0;
+  }
+  .cutin-title > p {
+    font-size: 9px;
+  }
+  .cutin-title > span {
+    font-size: 7px;
+  }
+  .cutin-heading > h2 {
+    font-size: 20px;
+  }
+  .cutin-heading > span {
+    font-size: 7px;
+  }
+  .cutin-title > small {
+    font-size: 7px;
+  }
+  .preview-ultimate {
+    min-height: 34px;
+    font-size: 8px;
+    padding: 7px 9px;
+  }
+}
+@media (orientation: portrait) {
+  .turn-battle .turn-order {
+    top: 136px;
+    left: 12px;
+    gap: 5px;
+    width: 130px;
+  }
+  .turn-actor {
+    min-height: 39px;
+    padding: 4px;
+    gap: 5px;
+  }
+  .turn-actor .party-avatar {
+    width: 21px;
+    height: 29px;
+    font-size: 16px;
+  }
+  .turn-actor strong {
+    font-size: 8px;
+    margin-bottom: 4px;
+  }
+  .turn-actor small {
+    font-size: 7px;
+  }
+  .turn-order > .tiny-label {
+    font-size: 7px;
+  }
+  .turn-actor .order-number {
+    font-size: 6px;
+    width: 10px;
+  }
+  .turn-enemy {
+    font-size: 8px;
+    padding: 7px;
+  }
+  .turn-enemy svg {
+    height: 13px;
+    width: 13px;
+  }
+  .turn-state {
+    bottom: 290px;
+    left: 50%;
+    max-width: 95%;
+  }
+  .turn-state > strong {
+    font-size: 15px;
+  }
+  .turn-state > p {
+    font-size: 9px;
+  }
+  .turn-state > .eyebrow {
+    font-size: 8px;
+  }
+  .turn-start {
+    min-width: 180px;
+    min-height: 44px;
+    font-size: 12px;
+  }
+  .turn-battle .battle-status {
+    bottom: 235px;
+    left: 20px;
+    width: calc(100% - 40px);
+  }
+  .turn-command-panel {
+    left: 15px;
+    right: 15px;
+    bottom: 40px;
+    width: auto;
+  }
+  .command-heading {
+    gap: 10px;
+  }
+  .command-heading > span {
+    font-size: 8px;
+  }
+  .command-heading b {
+    font-size: 10px;
+  }
+  .battle-lp-picker button {
+    min-width: 40px;
+    min-height: 32px;
+    font-size: 9px;
+  }
+  .turn-battle .action-controls {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .turn-battle .action-button,
+  .turn-battle .action-ultimate {
+    min-height: 73px;
+    gap: 4px;
+    padding: 5px;
+  }
+  .turn-battle .action-button b {
+    font-size: 11px;
+  }
+  .turn-battle .action-button > small {
+    font-size: 8px;
+  }
+  .turn-battle .action-icon {
+    width: 25px;
+    height: 25px;
+  }
+  .turn-battle .action-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .turn-battle .battle-footer {
+    bottom: 14px;
+    left: 20px;
+    right: 20px;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 7px;
+  }
+  .cutin-heading {
+    left: 6%;
+    top: 13%;
+  }
+  .cutin-heading > h2 {
+    font-size: 21px;
+  }
+  .cutin-heading > span {
+    font-size: 8px;
+  }
+  .cutin-skip {
+    font-size: 10px;
+    top: 21%;
+    right: 6%;
+    padding: 8px 11px;
+  }
+  .cutin-title {
+    left: 6%;
+    right: 6%;
+    bottom: 15%;
+    padding-left: 15px;
+  }
+  .cutin-title > h1 {
+    font-size: 32px;
+    letter-spacing: 0.1em;
+  }
+  .cutin-title > span {
+    font-size: 8px;
+    letter-spacing: 0.2em;
+  }
+  .cutin-title > p {
+    font-size: 10px;
+  }
+  .cutin-title > small {
+    font-size: 8px;
+  }
+  .preview-ultimate {
+    font-size: 9px;
+    min-height: 38px;
+  }
+}
+.cinematic-active #toast.visible {
+  opacity: 0;
+}

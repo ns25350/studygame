@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createState, dayKey, SAVE_KEY, startBattle } from '../../src/model';
+import {
+  createState,
+  dayKey,
+  SAVE_KEY,
+  startBattle,
+  beginTurn,
+  queueAction,
+} from '../../src/model';
 
 const nav = (page: Page, name: string) =>
   page.locator('.sidebar').getByRole('button', { name, exact: true }).click();
@@ -139,47 +146,42 @@ test('plans store user text safely and analytics reflect real study', async ({ p
   await expect(page.locator('.bar-chart')).toBeVisible();
   await expect(page.locator('.analytics-stats')).toContainText('0分');
 });
-test('real-time movement, switching, combat win and reload never duplicate rewards', async ({
+test('turn commands wait for input, preserve actor on reload, and retaliate once after all four', async ({
   page,
 }) => {
-  test.setTimeout(90000);
+  await page.addInitScript(() => {
+    Math.random = () => 0.99;
+  });
   await page.goto('/');
   await nav(page, 'ダンジョン');
   await page.locator('[data-action="dungeon"][data-value="practice"]').click();
-  await page.getByRole('button', { name: '挑戦する', exact: false }).click();
-  await page.waitForTimeout(800);
-  await page.keyboard.down('d');
-  await page.waitForTimeout(400);
-  await page.keyboard.up('d');
+  await page.locator('[data-action="start-battle"]').click();
+  await expect(page.locator('.turn-battle')).toHaveAttribute('data-phase', 'ready');
+  const initial = await saved(page);
+  await page.waitForTimeout(1500);
+  expect((await saved(page)).battle.hp).toBe(initial.battle.hp);
+  expect((await saved(page)).battle.enemyHp).toBe(initial.battle.enemyHp);
+  await page.getByRole('button', { name: 'ターン開始' }).click();
+  await page.getByRole('button', { name: '運動の一撃', exact: true }).click();
+  await expect(page.locator('.turn-actor.active')).toContainText('アオイ');
   await page.getByRole('button', { name: '戦闘を中断', exact: true }).click();
   const paused = await saved(page);
-  expect(paused.battle.x).toBeGreaterThan(0.2);
+  expect(paused.battle.turn.index).toBe(1);
   await page.reload();
-  expect((await saved(page)).battle.x).toBeCloseTo(paused.battle.x);
-  await nav(page, 'ダンジョン');
-  await page.getByRole('button', { name: '進行中の戦闘を再開' }).click();
-  await page.keyboard.press('2');
-  await expect(page.locator('[data-action="battle-character"][data-value="ao"]')).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-  for (let i = 0; i < 25; i++) {
-    if (!(await page.locator('.battle-ui').count())) break;
-    const attack = page.locator('[data-action="attack"][data-value="normal"]');
-    await expect(attack).toHaveAttribute('aria-disabled', 'false');
-    await page.keyboard.press('j');
-    await page.waitForTimeout(150);
+  await page.getByRole('button', { name: '戦闘を再開する' }).click();
+  expect((await saved(page)).battle.enemyHp).toBe(paused.battle.enemyHp);
+  for (const name of ['触媒の一滴', '地層の打撃', '芽吹きの一撃']) {
+    const button = page.getByRole('button', { name, exact: true });
+    await expect(button).toBeEnabled();
+    await button.click();
   }
-  await expect(page.getByRole('dialog', { name: '訓練完了' })).toBeVisible();
-  const result = await saved(page);
-  expect(result.battle).toBeNull();
-  expect(result.gems).toBe(500);
-  expect(result.lp).toBe(80);
-  expect(result.clears).toBe(0);
-  expect(result.lastResult.won).toBe(true);
-  await page.reload();
-  expect((await saved(page)).gems).toBe(500);
-  expect((await saved(page)).battle).toBeNull();
+  await expect(page.getByRole('button', { name: 'ターン開始' })).toBeVisible();
+  const next = await saved(page);
+  expect(next.battle.turn.number).toBe(2);
+  expect(next.battle.actions).toBe(4);
+  expect(next.battle.hp).toBe(initial.battle.hp - 29);
+  await page.waitForTimeout(1300);
+  expect((await saved(page)).battle.hp).toBe(next.battle.hp);
 });
 test('valid backup import creates a backup download, invalid import preserves the save', async ({
   page,
@@ -211,7 +213,7 @@ test('paid battle victory grants resources once through the actual UI', async ({
   const state = createState();
   startBattle(state, 'normal');
   state.battle!.enemyHp = 1;
-  state.battle!.char = 'ao';
+  beginTurn(state);
   await seed(page, state);
   await page.getByRole('button', { name: '戦闘を再開する' }).click();
   await expect(page.locator('[data-action="attack"][data-value="normal"]')).toHaveAttribute(
@@ -232,20 +234,16 @@ test('paid battle victory grants resources once through the actual UI', async ({
   expect(reloaded.clears).toBe(1);
   expect(reloaded.battle).toBeNull();
 });
-test('touch-style joystick pointer movement and settings are functional', async ({ page }) => {
+test('landscape command buttons, reduced motion setting and retreat work', async ({ page }) => {
   await page.setViewportSize({ width: 844, height: 390 });
   await page.goto('/');
   await nav(page, 'ダンジョン');
   await page.locator('[data-action="dungeon"][data-value="practice"]').click();
   await page.locator('[data-action="start-battle"]').click();
-  const pad = (await page.locator('#joystick').boundingBox())!;
-  await page.mouse.move(pad.x + pad.width / 2, pad.y + pad.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(pad.x + pad.width, pad.y + pad.height / 2);
-  await page.waitForTimeout(600);
-  await page.mouse.up();
+  await page.getByRole('button', { name: 'ターン開始' }).click();
+  await page.getByRole('button', { name: '運動の一撃', exact: true }).click();
+  await expect(page.locator('.turn-actor.active')).toContainText('アオイ');
   await page.getByRole('button', { name: '戦闘を中断', exact: true }).click();
-  expect((await saved(page)).battle.x).toBeGreaterThan(0.3);
   await nav(page, '設定');
   await page.getByRole('switch', { name: '動きを抑える' }).click();
   await expect(page.getByRole('switch', { name: '動きを抑える' })).toHaveAttribute(
@@ -255,6 +253,116 @@ test('touch-style joystick pointer movement and settings are functional', async 
   await page.getByRole('button', { name: '撤退する', exact: true }).click();
   await page.getByRole('button', { name: '実行する' }).click();
   expect((await saved(page)).battle).toBeNull();
+});
+for (const [id, name] of [
+  ['ko', 'コウイチロウ'],
+  ['ao', 'アオイ'],
+  ['io', 'イオ'],
+  ['mi', 'ミナト'],
+]) {
+  test(`ultimate preview for ${name} has a moving camera and never consumes resources`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.goto('/');
+    await nav(page, 'キャラクター');
+    await page.locator(`.character-select [data-value="${id}"]`).click();
+    await page.getByRole('tab', { name: 'スキル', exact: true }).click();
+    const before = await saved(page);
+    await page.getByRole('button', { name: '必殺演出を見る' }).click();
+    await expect(page.locator('#world')).toHaveAttribute('data-cinematic', id);
+    await expect(page.locator('#world')).toHaveAttribute('data-camera-shot', 'charge', {
+      timeout: 7000,
+    });
+    await expect(page.locator('.ultimate-cutin')).toContainText(name);
+    await page.getByRole('button', { name: '演出をスキップ' }).click();
+    await expect(page.locator('.ultimate-cutin')).toHaveCount(0);
+    expect(await saved(page)).toEqual(before);
+  });
+}
+test('ultimate skip applies one paid hit and one reward; repeated Escape cannot duplicate it', async ({
+  page,
+}) => {
+  const state = createState();
+  startBattle(state, 'normal');
+  beginTurn(state);
+  state.battle!.gauges.ko = 100;
+  state.battle!.enemyHp = 1;
+  await seed(page, state);
+  await page.getByRole('button', { name: '戦闘を再開する' }).click();
+  await page.getByRole('button', { name: '虚数の衝突', exact: true }).click();
+  await expect(page.locator('.ultimate-cutin')).toBeVisible();
+  expect((await saved(page)).lp).toBe(70);
+  expect((await saved(page)).battle.enemyHp).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: '書庫を解放しました' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.reload();
+  const after = await saved(page);
+  expect(after.lp).toBe(70);
+  expect(after.gems).toBe(545);
+  expect(after.clears).toBe(1);
+});
+test('ultimate completes naturally through every camera shot and advances only one actor', async ({
+  page,
+}) => {
+  test.setTimeout(30000);
+  const state = createState();
+  startBattle(state, 'boss');
+  beginTurn(state);
+  state.battle!.gauges.ko = 100;
+  const shadow = structuredClone(state),
+    pending = queueAction(shadow, 'ultimate', () => 0.99);
+  await page.addInitScript(() => {
+    Math.random = () => 0.99;
+  });
+  await seed(page, state);
+  await page.getByRole('button', { name: '戦闘を再開する' }).click();
+  await page.evaluate(() => {
+    (window as any).__shots = [];
+    new MutationObserver(() => {
+      const shot = document.querySelector('#world')?.getAttribute('data-camera-shot');
+      if (shot && !(window as any).__shots.includes(shot)) (window as any).__shots.push(shot);
+    }).observe(document.querySelector('#world')!, {
+      attributes: true,
+      attributeFilter: ['data-camera-shot'],
+    });
+  });
+  await page.getByRole('button', { name: '虚数の衝突', exact: true }).click();
+  await expect(page.locator('.ultimate-cutin')).toBeVisible();
+  await expect(page.locator('.ultimate-cutin')).toHaveCount(0, { timeout: 15000 });
+  const after = await saved(page);
+  expect(after.battle.enemyHp).toBe(pending.after.enemyHp);
+  expect(after.battle.turn.index).toBe(1);
+  expect(after.battle.actions).toBe(1);
+  expect(after.lp).toBe(70);
+  expect(await page.evaluate(() => (window as any).__shots)).toEqual([
+    'portrait',
+    'charge',
+    'release',
+    'impact',
+    'recovery',
+  ]);
+});
+test('a saved interrupted ultimate recovers its pending effect and preserves inventory', async ({
+  page,
+}) => {
+  const state = createState();
+  startBattle(state, 'boss');
+  beginTurn(state);
+  state.battle!.gauges.ko = 100;
+  const pending = queueAction(state, 'ultimate', () => 0.99),
+    expectedHp = pending.after.enemyHp;
+  await seed(page, state);
+  await page.getByRole('button', { name: '戦闘を再開する' }).click();
+  const after = await saved(page);
+  expect(after.battle.enemyHp).toBe(expectedHp);
+  expect(after.battle.turn.index).toBe(1);
+  expect(after.lp).toBe(70);
+  expect(after.weapons).toEqual(state.weapons);
+  await page.reload();
+  expect((await saved(page)).battle.enemyHp).toBe(expectedHp);
+  expect((await saved(page)).lp).toBe(70);
 });
 for (const viewport of [
   { width: 844, height: 390 },

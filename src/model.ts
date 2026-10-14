@@ -38,7 +38,49 @@ export interface Plan {
   due: string;
   done: boolean;
 }
+export type BattlePhase = 'ready' | 'command' | 'animating' | 'enemy';
+export type SkillAfter = Pick<
+  Battle,
+  | 'enemyHp'
+  | 'hp'
+  | 'shield'
+  | 'mass'
+  | 'initialMass'
+  | 'speed'
+  | 'collision'
+  | 'poison'
+  | 'buff'
+  | 'buffLeft'
+>;
+export interface PendingAction {
+  id: string;
+  actor: CharacterId;
+  action: ActionId;
+  applied: boolean;
+  damage: number;
+  critical: boolean;
+  heal: number;
+  shield: number;
+  after: SkillAfter;
+}
+export interface TurnState {
+  version: 1;
+  number: number;
+  index: number;
+  phase: BattlePhase;
+  pending: PendingAction | null;
+  log: string[];
+}
+export const newTurn = (number = 1): TurnState => ({
+  version: 1,
+  number,
+  index: 0,
+  phase: 'ready',
+  pending: null,
+  log: [],
+});
 export interface Battle {
+  turn: TurnState;
   mode: Mode;
   free: boolean;
   enemyHp: number;
@@ -77,6 +119,7 @@ export interface Summon {
   info: string;
 }
 export interface Result {
+  turns?: number;
   won: boolean;
   mode: Mode;
   elapsed: number;
@@ -108,7 +151,8 @@ export interface State {
   baseLP: number;
   clears: number;
   booksEarned: number;
-  best: { seconds: number; studyMinutes: number } | null;
+  best: { seconds: number; studyMinutes: number; turns?: number } | null;
+  actionBest?: { seconds: number; studyMinutes: number };
   timer: { start: number; subject: string; content: string } | null;
   battle: Battle | null;
   lastResult: Result | null;
@@ -415,6 +459,7 @@ export function startBattle(s: State, mode: Mode) {
   const maxHp = Math.round(1200 + CHARACTER_IDS.reduce((sum, id) => sum + stats(s, id).hp, 0));
   s.lastResult = null;
   s.battle = {
+    turn: newTurn(),
     mode,
     free,
     enemyHp: DUNGEONS[mode].hp,
@@ -423,7 +468,7 @@ export function startBattle(s: State, mode: Mode) {
     shield: 0,
     sp: 5,
     gauges: { ko: 0, ao: 0, io: 0, mi: 0 },
-    char: s.selected,
+    char: 'ko',
     x: 0,
     z: 3,
     enemyX: 0,
@@ -450,6 +495,7 @@ export function finishBattle(s: State, won: boolean) {
   const d = DUNGEONS[b.mode];
   const result = {
     won,
+    turns: b.turn.number,
     mode: b.mode,
     elapsed: b.elapsed,
     actions: b.actions,
@@ -472,14 +518,16 @@ export function finishBattle(s: State, won: boolean) {
       });
       s.booksEarned++;
     }
-    if (b.mode === 'endgame' && (!s.best || b.elapsed < s.best.seconds))
-      s.best = { seconds: b.elapsed, studyMinutes: totalMinutes(s) };
+    if (b.mode === 'endgame' && (!s.best?.turns || b.turn.number < s.best.turns)) {
+      if (s.best && !s.best.turns) s.actionBest ??= { ...s.best };
+      s.best = { seconds: b.elapsed, turns: b.turn.number, studyMinutes: totalMinutes(s) };
+    }
   }
   s.lastResult = result;
   s.battle = null;
   return result;
 }
-export function performAction(s: State, action: ActionId, rng = Math.random) {
+function calculateSkill(s: State, action: ActionId, rng = Math.random) {
   const b = s.battle;
   if (!b) throw new Error('戦闘は終了しています。');
   const id = b.char,
@@ -487,15 +535,13 @@ export function performAction(s: State, action: ActionId, rng = Math.random) {
     c = CHARACTERS[id],
     st = stats(s, id),
     w = st.weapon.name;
-  if (b.cooldowns[action] > 0.02) throw new Error('技の準備中です。');
+  if (!ACTIONS.includes(action)) throw new Error('技を選んでください。');
+  if (b.turn.phase !== 'command' || b.char !== CHARACTER_IDS[b.turn.index])
+    throw new Error('現在のキャラクターの行動を選択してください。');
   if (b.sp < c.sp[index]) throw new Error('SPが不足しています。通常攻撃で回復できます。');
   if (action === 'ultimate' && b.gauges[id] < 100) throw new Error('必殺ゲージが100必要です。');
   if (!b.free && s.lp < s.baseLP)
-    throw new Error('LPが不足しています。戦闘を中断して学習を記録できます。');
-  const distance = Math.hypot(b.x - b.enemyX, b.z - b.enemyZ);
-  const support = action === 'skill2' || (id === 'ko' && action === 'skill1');
-  if (!support && distance > (id === 'ko' || id === 'io' ? (action === 'ultimate' ? 9 : 3.6) : 11))
-    throw new Error('敵に近づいてから攻撃してください。');
+    throw new Error('LPが不足しています。中断して学習を記録するか、消費LPを下げてください。');
   if (!b.free) s.lp -= s.baseLP;
   b.sp -= c.sp[index];
   b.actions++;
@@ -542,7 +588,7 @@ export function performAction(s: State, action: ActionId, rng = Math.random) {
     }
     if (action === 'skill2') {
       b.buff = 1 + 0.2 * skill * L;
-      b.buffLeft = 8;
+      b.buffLeft = 2;
     }
     if (action === 'ultimate') {
       damage = 5.5 * A * M + b.poison * 300 * L;
@@ -590,9 +636,111 @@ export function performAction(s: State, action: ActionId, rng = Math.random) {
   if (action === 'ultimate') b.gauges[id] = 0;
   else
     b.gauges[id] = Math.min(100, b.gauges[id] + [28, 40, 25][index] + (w === '観測者の杖' ? 8 : 0));
-  b.cooldowns[action] = [0.65, 3.8, 4.8, 6][index];
-  if (b.enemyHp === 0) finishBattle(s, true);
+
   return { damage, critical, heal: Math.round(heal), shield: Math.round(shield), action, id };
+}
+export function beginTurn(s: State) {
+  const b = s.battle;
+  if (!b || b.turn.phase !== 'ready') throw new Error('ターンの開始待ちではありません。');
+  if (!b.free && s.lp < s.baseLP * 4)
+    throw new Error(
+      `ターン開始には${s.baseLP * 4} LP必要です。消費を下げるか学習を記録してください。`,
+    );
+  b.turn.phase = 'command';
+  b.turn.index = 0;
+  b.char = 'ko';
+}
+export function queueAction(s: State, action: ActionId, rng = Math.random): PendingAction {
+  const b = s.battle;
+  if (!b) throw new Error('戦闘は終了しています。');
+  const shadow = structuredClone(s),
+    result = calculateSkill(shadow, action, rng),
+    next = shadow.battle!;
+  const after = Object.fromEntries(
+    [
+      'enemyHp',
+      'hp',
+      'shield',
+      'mass',
+      'initialMass',
+      'speed',
+      'collision',
+      'poison',
+      'buff',
+      'buffLeft',
+    ].map((k) => [k, next[k as keyof Battle]]),
+  ) as SkillAfter;
+  const pending = { ...result, actor: b.char, id: uid(), applied: false, after };
+  // Charge exactly once before rendering; persist this pending transaction.
+  s.lp = shadow.lp;
+  b.sp = next.sp;
+  b.gauges = next.gauges;
+  b.actions = next.actions;
+  b.turn.pending = pending;
+  b.turn.phase = 'animating';
+  return pending;
+}
+export function applyPendingAction(s: State, id: string) {
+  const b = s.battle,
+    p = b?.turn.pending;
+  if (!b || !p || p.id !== id || p.applied) return null;
+  Object.assign(b, p.after);
+  p.applied = true;
+  b.turn.log.unshift(
+    `${CHARACTERS[p.actor].name}：${CHARACTERS[p.actor].skills[ACTIONS.indexOf(p.action)]}${p.damage ? ` / ${p.damage}ダメージ` : p.heal ? ` / HP +${p.heal}` : p.shield ? ` / 盾 +${p.shield}` : ' / 強化'}`,
+  );
+  b.turn.log = b.turn.log.slice(0, 20);
+  return p;
+}
+export function completePendingAction(s: State, id: string) {
+  const b = s.battle,
+    p = b?.turn.pending;
+  if (!b || !p || p.id !== id) return;
+  applyPendingAction(s, id);
+  b.turn.pending = null;
+  if (b.enemyHp === 0) {
+    finishBattle(s, true);
+    return;
+  }
+  b.turn.index++;
+  if (b.turn.index >= 4) b.turn.phase = 'enemy';
+  else {
+    b.turn.phase = 'command';
+    b.char = CHARACTER_IDS[b.turn.index];
+  }
+}
+export function resolveEnemyTurn(s: State, turnNumber: number) {
+  const b = s.battle;
+  if (!b || b.turn.phase !== 'enemy' || b.turn.number !== turnNumber) return null;
+  const dot = b.poison * 90;
+  b.enemyHp = Math.max(0, b.enemyHp - dot);
+  if (dot) b.turn.log.unshift(`共有状態異常：${dot}ダメージ`);
+  if (!b.enemyHp) {
+    finishBattle(s, true);
+    return { damage: 0, dot };
+  }
+  const damage = enemyHit(s);
+  if (!s.battle) return { damage, dot };
+  b.turn.log.unshift(`敵の反撃：${damage ? `${damage}ダメージ` : '盾で防御'}`);
+  b.turn.log = b.turn.log.slice(0, 20);
+  if (b.buffLeft > 0 && --b.buffLeft === 0) b.buff = 1;
+  b.turn.number++;
+  b.turn.index = 0;
+  b.turn.phase = 'ready';
+  b.char = 'ko';
+  return { damage, dot };
+}
+export function recoverBattle(s: State) {
+  const b = s.battle;
+  if (b?.turn.phase === 'animating' && b.turn.pending) completePendingAction(s, b.turn.pending.id);
+  // Enemy phases remain explicit and are resumed once by the presentation layer.
+}
+// Synchronous domain helper for simulations/tests; UI uses the persisted transaction above.
+export function performAction(s: State, action: ActionId, rng = Math.random) {
+  const p = queueAction(s, action, rng);
+  applyPendingAction(s, p.id);
+  completePendingAction(s, p.id);
+  return p;
 }
 export function enemyHit(s: State) {
   const b = s.battle;
@@ -615,7 +763,7 @@ export function validateSave(raw: unknown): State {
   };
   const obj = raw as any;
   if (!obj || obj.format !== 'study-arcana-action-save' || obj.version !== 1) return fail();
-  const s = obj.state as State;
+  const s = structuredClone(obj.state) as State;
   if (!s || s.version !== 1) return fail();
   const num = (n: unknown, min = 0, max = 1e9, integer = true) =>
     typeof n === 'number' &&
@@ -790,7 +938,8 @@ export function validateSave(raw: unknown): State {
     ] as const)
       if (!num(b[k], 0, 1e9, false)) return fail();
     if (
-      b.enemyHp <= 0 ||
+      (b.enemyHp <= 0 &&
+        !(b.enemyHp === 0 && b.turn?.phase === 'animating' && b.turn.pending?.applied)) ||
       b.enemyHp > DUNGEONS[b.mode].hp ||
       b.hp <= 0 ||
       b.hp > b.maxHp ||
@@ -806,6 +955,82 @@ export function validateSave(raw: unknown): State {
       !CHARACTER_IDS.every((id) => num(b.gauges?.[id], 0, 100, false))
     )
       return fail();
+  }
+  if (s.best?.turns !== undefined && !num(s.best.turns, 1)) return fail();
+  if (
+    s.actionBest &&
+    (!num(s.actionBest.seconds, 0, 1e9, false) || !num(s.actionBest.studyMinutes))
+  )
+    return fail();
+  if (s.lastResult?.turns !== undefined && !num(s.lastResult.turns, 1)) return fail();
+  if (s.battle) {
+    const b = s.battle;
+    if (b.turn === undefined) {
+      b.turn = newTurn(Math.floor(b.actions / 4) + 1);
+      b.char = 'ko';
+      b.buffLeft = Math.min(2, Math.ceil(b.buffLeft / 4));
+      b.cooldowns = { normal: 0, skill1: 0, skill2: 0, ultimate: 0 };
+    }
+    const t = b.turn;
+    if (
+      !t ||
+      t.version !== 1 ||
+      !num(t.number, 1) ||
+      !num(t.index, 0, 4) ||
+      !['ready', 'command', 'animating', 'enemy'].includes(t.phase) ||
+      !Array.isArray(t.log) ||
+      t.log.length > 20 ||
+      t.log.some((l) => !text(l, 300))
+    )
+      return fail();
+    if (t.phase === 'enemy' ? t.index !== 4 : t.index > 3) return fail();
+    if (
+      (t.phase === 'ready' && t.index !== 0) ||
+      (t.phase !== 'enemy' && b.char !== CHARACTER_IDS[t.index])
+    )
+      return fail();
+    const p = t.pending;
+    if (t.phase === 'animating') {
+      if (
+        !p ||
+        Object.keys(p.after ?? {})
+          .sort()
+          .join(',') !==
+          'buff,buffLeft,collision,enemyHp,hp,initialMass,mass,poison,shield,speed' ||
+        !text(p.id, 100) ||
+        !p.id ||
+        p.actor !== b.char ||
+        !ACTIONS.includes(p.action) ||
+        typeof p.applied !== 'boolean' ||
+        typeof p.critical !== 'boolean' ||
+        !num(p.damage) ||
+        !num(p.heal) ||
+        !num(p.shield) ||
+        !p.after
+      )
+        return fail();
+      for (const k of [
+        'enemyHp',
+        'hp',
+        'shield',
+        'mass',
+        'initialMass',
+        'speed',
+        'poison',
+        'buff',
+        'buffLeft',
+      ] as const)
+        if (!num(p.after[k], 0, 1e9, false)) return fail();
+      if (
+        typeof p.after.collision !== 'boolean' ||
+        p.after.enemyHp > DUNGEONS[b.mode].hp ||
+        p.after.hp > b.maxHp ||
+        p.after.hp <= 0
+      )
+        return fail();
+      if (p.applied && Object.keys(p.after).some((k) => (b as any)[k] !== (p.after as any)[k]))
+        return fail();
+    } else if (p !== null) return fail();
   }
   return structuredClone(s);
 }
